@@ -493,34 +493,41 @@ class core_renderer extends renderer_base {
             return '';
         }
 
-        // Get a list of all the activities in the course.
-        $modules = get_fast_modinfo($course->id)->get_cms();
+        // Build ordered activity list using sort_cm_array() which replicates the exact
+        // display order of the course page, including correct subsection positioning.
+        // This uses the same weight-based mechanism as the course index sidebar, correctly
+        // handling subsection order after course copy (Bug 1) and after moving subsections (Bug 2).
+        $modinfo = get_fast_modinfo($course->id);
 
-        // Put the modules into an array in order by the position they are shown in the course.
-        $mods = [];
-        $activitylist = [];
-        foreach ($modules as $module) {
-            // Only add activities the user can access, aren't in stealth mode, are of a type that is visible on the course,
-            // and have a url (eg. mod_label does not).
+        // Get all navigable CMs (skip subsection containers — they are not activities).
+        $cms = array_filter($modinfo->get_cms(), function ($module) {
             if (!$module->uservisible || $module->is_stealth() || empty($module->url) || !$module->is_of_type_that_can_display()) {
-                continue;
+                return false;
             }
-            $mods[$module->id] = $module;
+            // Subsection container modules are not navigable activities.
+            return $module->get_delegated_section_info() === null;
+        });
 
-            // No need to add the current module to the list for the activity dropdown menu.
-            if ($module->id == $this->page->cm->id) {
-                continue;
+        // Sort CMs in course display order (same as course index: sequence within sections,
+        // section number across top-level sections).
+        $modinfo->sort_cm_array($cms);
+
+        $mods = [];
+        $orderedmodids = [];
+        $activitylist = [];
+
+        foreach ($cms as $module) {
+            $mods[$module->id] = $module;
+            $orderedmodids[] = $module->id;
+
+            if ($module->id != $this->page->cm->id) {
+                $modname = $module->get_formatted_name();
+                if (!$module->visible) {
+                    $modname .= ' ' . get_string('hiddenwithbrackets');
+                }
+                $linkurl = new moodle_url($module->url, ['forceview' => 1]);
+                $activitylist[$linkurl->out(false)] = $modname;
             }
-            // Module name.
-            $modname = $module->get_formatted_name();
-            // Display the hidden text if necessary.
-            if (!$module->visible) {
-                $modname .= ' ' . get_string('hiddenwithbrackets');
-            }
-            // Module URL.
-            $linkurl = new moodle_url($module->url, ['forceview' => 1]);
-            // Add module URL (as key) and name (as value) to the activity list array.
-            $activitylist[$linkurl->out(false)] = $modname;
         }
 
         $nummods = count($mods);
@@ -530,10 +537,8 @@ class core_renderer extends renderer_base {
             return '';
         }
 
-        // Get an array of just the course module ids used to get the cmid value based on their position in the course.
-        $modids = array_keys($mods);
-
         // Get the position in the array of the course module we are viewing.
+        $modids = $orderedmodids;
         $position = array_search($this->page->cm->id, $modids);
 
         $prevmod = null;
