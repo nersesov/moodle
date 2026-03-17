@@ -106,6 +106,22 @@ class sectionselector implements named_templatable, renderable {
             }
         }
 
+        // Sort the subsections of each parent by the position of their delegating course module
+        // in the parent section sequence. This matches the course display order (and the course
+        // index), instead of the raw section number order which does not change when a subsection
+        // is reordered by drag and drop.
+        foreach ($sectionwithchildren as $parentnum => $subsections) {
+            $position = array_flip(array_values($modinfo->sections[$parentnum] ?? []));
+            usort($subsections, function (section_info $a, section_info $b) use ($position): int {
+                $cma = $a->get_component_instance()?->get_cm();
+                $cmb = $b->get_component_instance()?->get_cm();
+                $posa = ($cma && isset($position[$cma->id])) ? $position[$cma->id] : PHP_INT_MAX;
+                $posb = ($cmb && isset($position[$cmb->id])) ? $position[$cmb->id] : PHP_INT_MAX;
+                return $posa <=> $posb;
+            });
+            $sectionwithchildren[$parentnum] = $subsections;
+        }
+
         foreach ($allsections as $section) {
             $this->add_section_menu($format, $course, $section);
             if (isset($sectionwithchildren[$section->sectionnum])) {
