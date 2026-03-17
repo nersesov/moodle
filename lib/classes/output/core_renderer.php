@@ -501,34 +501,57 @@ class core_renderer extends renderer_base {
             return '';
         }
 
-        // Get a list of all the activities in the course.
-        $modules = get_fast_modinfo($course->id)->get_cms();
-
-        // Put the modules into an array in order by the position they are shown in the course.
+        // Build ordered activity list by walking course structure so that activities
+        // inside subsections appear in correct display order (between other activities), not at the end.
+        $modinfo = get_fast_modinfo($course->id);
+        $sections = $modinfo->get_listed_section_info_all();
         $mods = [];
+        $orderedmodids = [];
         $activitylist = [];
-        foreach ($modules as $module) {
-            // Only add activities the user can access, aren't in stealth mode, are of a type that is visible on the course,
-            // and have a url (eg. mod_label does not).
+
+        $addmodule = function ($module) use (&$mods, &$orderedmodids, &$activitylist) {
             if (!$module->uservisible || $module->is_stealth() || empty($module->url) || !$module->is_of_type_that_can_display()) {
-                continue;
+                return;
             }
             $mods[$module->id] = $module;
+            $orderedmodids[] = $module->id;
 
-            // No need to add the current module to the list for the activity dropdown menu.
-            if ($module->id == $this->page->cm->id) {
-                continue;
+            if ($module->id != $this->page->cm->id) {
+                $modname = $module->get_formatted_name();
+                if (!$module->visible) {
+                    $modname .= ' ' . get_string('hiddenwithbrackets');
+                }
+                $linkurl = new moodle_url($module->url, ['forceview' => 1]);
+                $activitylist[$linkurl->out(false)] = $modname;
             }
-            // Module name.
-            $modname = $module->get_formatted_name();
-            // Display the hidden text if necessary.
-            if (!$module->visible) {
-                $modname .= ' ' . get_string('hiddenwithbrackets');
+        };
+
+        ksort($sections);
+        foreach ($sections as $section) {
+            $sectionnum = $section->section;
+            $cmids = $modinfo->get_sections()[$sectionnum] ?? [];
+            foreach ($cmids as $cmid) {
+                try {
+                    $module = $modinfo->get_cm($cmid);
+                } catch (\moodle_exception $e) {
+                    continue;
+                }
+                $delegatedsection = $module->get_delegated_section_info();
+                if ($delegatedsection !== null) {
+                    // Subsection: expand and add activities inside it in sequence order.
+                    $subcmids = $modinfo->get_sections()[$delegatedsection->section] ?? [];
+                    foreach ($subcmids as $subcmid) {
+                        try {
+                            $submodule = $modinfo->get_cm($subcmid);
+                            $addmodule($submodule);
+                        } catch (\moodle_exception $e) {
+                            continue;
+                        }
+                    }
+                } else {
+                    $addmodule($module);
+                }
             }
-            // Module URL.
-            $linkurl = new moodle_url($module->url, ['forceview' => 1]);
-            // Add module URL (as key) and name (as value) to the activity list array.
-            $activitylist[$linkurl->out(false)] = $modname;
         }
 
         $nummods = count($mods);
@@ -538,10 +561,8 @@ class core_renderer extends renderer_base {
             return '';
         }
 
-        // Get an array of just the course module ids used to get the cmid value based on their position in the course.
-        $modids = array_keys($mods);
-
         // Get the position in the array of the course module we are viewing.
+        $modids = $orderedmodids;
         $position = array_search($this->page->cm->id, $modids);
 
         $prevmod = null;
