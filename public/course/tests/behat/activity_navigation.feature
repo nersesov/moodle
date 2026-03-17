@@ -273,3 +273,4 @@ Feature: Activity navigation
     Then "#prev-activity-link" "css_element" should not exist
     And "#next-activity-link" "css_element" should not exist
     And "Jump to activity" "field" should not exist
+
