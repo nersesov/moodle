@@ -29,6 +29,7 @@ use core\output\named_templatable;
 use core_courseformat\base as course_format;
 use core_courseformat\output\local\courseformat_named_templatable;
 use renderable;
+use section_info;
 use stdClass;
 
 /**
@@ -80,7 +81,6 @@ class sectionnavigation implements named_templatable, renderable {
         $context = context_course::instance($course->id);
 
         $modinfo = $this->format->get_modinfo();
-        $sections = $modinfo->get_section_info_all();
 
         // FIXME: This is really evil and should by using the navigation API.
         $canviewhidden = has_capability('moodle/course:viewhiddensections', $context, $USER);
@@ -93,33 +93,65 @@ class sectionnavigation implements named_templatable, renderable {
             'currentsection' => $this->sectionno,
         ];
 
-        $back = $this->sectionno - 1;
-        while ($back >= 0 && empty($data->previousurl)) {
-            if ($canviewhidden || $sections[$back]->uservisible) {
-                if (!$sections[$back]->visible) {
-                    $data->previoushidden = true;
+        // Build the list of sections in course display order: top-level sections by section number,
+        // with each delegated (sub)section inserted at the position of its delegating course module
+        // in the parent sequence. This matches the course index order and, unlike raw section
+        // numbers, reflects drag and drop reordering of subsections.
+        $delegatedbycm = $modinfo->get_sections_delegated_by_cm();
+        $ordered = [];
+        $appendsection = function (section_info $section) use (&$appendsection, &$ordered, $modinfo, $delegatedbycm): void {
+            $ordered[] = $section;
+            foreach ($modinfo->sections[$section->section] ?? [] as $cmid) {
+                if (isset($delegatedbycm[$cmid])) {
+                    $appendsection($delegatedbycm[$cmid]);
                 }
-                $data->previousname = get_section_name($course, $sections[$back]);
-                $data->previousurl = course_get_url($course, $back, ['navigation' => true]);
-                // If there is no url for the section the link should not be displayed.
-                $data->hasprevious = !empty($data->previousurl);
             }
-            $back--;
+        };
+        foreach ($modinfo->get_section_info_all() as $section) {
+            if ($section->is_delegated()) {
+                continue;
+            }
+            $appendsection($section);
         }
 
-        $forward = $this->sectionno + 1;
-        $numsections = course_get_format($course)->get_last_section_number();
-        while ($forward <= $numsections and empty($data->nexturl)) {
-            if ($canviewhidden || $sections[$forward]->uservisible) {
-                if (!$sections[$forward]->visible) {
-                    $data->nexthidden = true;
-                }
-                $data->nextname = get_section_name($course, $sections[$forward]);
-                $data->nexturl = course_get_url($course, $forward, ['navigation' => true]);
-                // If there is no url for the section the link should not be displayed.
-                $data->hasnext = !empty($data->nexturl);
+        // Find the position of the current section in the display order.
+        $currentindex = null;
+        foreach ($ordered as $index => $section) {
+            if ($section->section == $this->sectionno) {
+                $currentindex = $index;
+                break;
             }
-            $forward++;
+        }
+
+        if ($currentindex !== null) {
+            // Previous: the first visible section before the current one in display order.
+            for ($i = $currentindex - 1; $i >= 0 && empty($data->previousurl); $i--) {
+                $section = $ordered[$i];
+                if ($canviewhidden || $section->uservisible) {
+                    if (!$section->visible) {
+                        $data->previoushidden = true;
+                    }
+                    $data->previousname = get_section_name($course, $section);
+                    $data->previousurl = course_get_url($course, (object) $section, ['navigation' => true]);
+                    // If there is no url for the section the link should not be displayed.
+                    $data->hasprevious = !empty($data->previousurl);
+                }
+            }
+
+            // Next: the first visible section after the current one in display order.
+            $count = count($ordered);
+            for ($i = $currentindex + 1; $i < $count && empty($data->nexturl); $i++) {
+                $section = $ordered[$i];
+                if ($canviewhidden || $section->uservisible) {
+                    if (!$section->visible) {
+                        $data->nexthidden = true;
+                    }
+                    $data->nextname = get_section_name($course, $section);
+                    $data->nexturl = course_get_url($course, (object) $section, ['navigation' => true]);
+                    // If there is no url for the section the link should not be displayed.
+                    $data->hasnext = !empty($data->nexturl);
+                }
+            }
         }
 
         $this->data = $data;
