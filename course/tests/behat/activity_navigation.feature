@@ -290,3 +290,44 @@ Feature: Activity navigation
     Then "#prev-activity-link" "css_element" should not exist
     And "#next-activity-link" "css_element" should not exist
     And "Jump to activity" "field" should not exist
+
+  @mod_subsection @javascript
+  Scenario: Activity navigation with subsections (MDL-85755)
+    Given the following "courses" exist:
+      | fullname | shortname | format | numsections | initsections |
+      | Course 3 | C3        | topics | 1           | 1            |
+    And the following "course enrolments" exist:
+      | user     | course | role    |
+      | student1 | C3     | student |
+    And the following "activities" exist:
+      | activity   | name         | course | idnumber | section |
+      | page       | Page A       | C3     | pagea    | 1       |
+      | subsection | Subsection 1 | C3     | subsec1  | 1       |
+      | page       | Page D       | C3     | paged    | 1       |
+      | page       | Page B       | C3     | pageb    | subsec1 |
+      | page       | Page C       | C3     | pagec    | subsec1 |
+    And I log in as "student1"
+    And I am on "Course 3" course homepage
+    When I follow "Page A"
+    Then "#prev-activity-link" "css_element" should not exist
+    And I should see "Page B" in the "#next-activity-link" "css_element"
+    And I follow "Page B"
+    And I should see "Page A" in the "#prev-activity-link" "css_element"
+    And I should see "Page C" in the "#next-activity-link" "css_element"
+    And I follow "Page C"
+    And I should see "Page B" in the "#prev-activity-link" "css_element"
+    And I should see "Page D" in the "#next-activity-link" "css_element"
+    And I follow "Page D"
+    And I should see "Page C" in the "#prev-activity-link" "css_element"
+    And "#next-activity-link" "css_element" should not exist
+    And I am on the "pagea" "Activity" page
+    And the "Jump to activity" select box should not contain "Page A"
+    And the "Jump to activity" select box should contain "Page B"
+    And the "Jump to activity" select box should contain "Page C"
+    And the "Jump to activity" select box should contain "Page D"
+    And I select "Page B" from the "Jump to activity" singleselect
+    And I should see "Page A" in the "#prev-activity-link" "css_element"
+    And I should see "Page C" in the "#next-activity-link" "css_element"
+    And I select "Page D" from the "Jump to activity" singleselect
+    And I should see "Page C" in the "#prev-activity-link" "css_element"
+    And "#next-activity-link" "css_element" should not exist
